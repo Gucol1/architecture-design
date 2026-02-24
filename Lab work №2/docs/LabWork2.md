@@ -4,7 +4,7 @@
 
 ![Контекстная диаграмма](context diagram.svg)
 
-Или по [ссылке](context%20diagram.svg)
+Или по [ссылке](context diagram.svg)
 
 ## Диаграмма контейнеров
 
