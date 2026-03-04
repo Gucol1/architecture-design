@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Auth App</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    input { padding: 8px; min-width: 240px; }
+    button { padding: 10px 14px; cursor: pointer; }
+    .danger { background: #c00; color: #fff; border: none; border-radius: 6px; }
+    .primary { background: #2563eb; color: #fff; border: none; border-radius: 6px; }
+    .muted { color: #666; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f6f6f6; }
+    code { background: #f4f4f4; padding: 2px 4px; border-radius: 4px; }
+    .status { white-space: pre-wrap; }
+  </style>
+</head>
+
+<body>
+  <h1>Лабораторная работа №5</h1>
+  <p class="muted">
+    Фронтенд ходит на <code>/api/...</code> (через Nginx proxy). Токен хранится в <code>localStorage</code>.
+  </p>
+
+  <div class="card">
+    <h2>Регистрация</h2>
+    <div class="row">
+      <input type="email" id="reg_email" placeholder="Email" />
+      <input type="password" id="reg_password" placeholder="Пароль" />
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="reg_active" checked />
+        Активен
+      </label>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="primary" onclick="registerUser()">Зарегистрироваться</button>
+    </div>
+    <p id="reg_result" class="status"></p>
+  </div>
+
+  <div class="card">
+    <h2>Авторизация</h2>
+    <div class="row">
+      <input type="email" id="login_email" placeholder="Email" />
+      <input type="password" id="login_password" placeholder="Пароль" />
+      <button class="danger" style="font-size:18px;" onclick="login()">Войти (большая красная кнопка)</button>
+      <button onclick="logout()">Logout</button>
+    </div>
+    <p id="login_result" class="status"></p>
+    <p class="muted">Текущий токен: <code id="token_preview">(нет)</code></p>
+  </div>
+
+  <div class="card">
+    <h2>Пользователи</h2>
+
+    <div class="row">
+      <input type="number" id="limit" value="10" min="1" max="100" />
+      <input type="number" id="offset" value="0" min="0" />
+      <button class="primary" onclick="loadUsers()">Обновить список</button>
+      <button onclick="clearToken()">Очистить токен</button>
+    </div>
+
+    <p id="users_result" class="status"></p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Активен</th>
+        </tr>
+      </thead>
+      <tbody id="users_tbody">
+        <tr><td colspan="3" class="muted">Пока пусто</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    function setStatus(elId, msg) {
+      document.getElementById(elId).innerText = msg;
+    }
+
+    function getToken() {
+      return localStorage.getItem("token");
+    }
+
+    function setToken(token) {
+      if (token) localStorage.setItem("token", token);
+      updateTokenPreview();
+    }
+
+    function updateTokenPreview() {
+      const token = getToken();
+      document.getElementById("token_preview").innerText = token ? (token.slice(0, 20) + "...") : "(нет)";
+    }
+
+    function clearToken() {
+      localStorage.removeItem("token");
+      updateTokenPreview();
+      setStatus("login_result", "Токен очищен");
+    }
+
+    async function registerUser() {
+      const email = document.getElementById("reg_email").value.trim();
+      const password = document.getElementById("reg_password").value;
+      const is_active = document.getElementById("reg_active").checked;
+
+      setStatus("reg_result", "");
+
+      try {
+        const res = await fetch("/api/v1/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, is_active })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setStatus("reg_result", `Пользователь создан\nid: ${data.id}\nemail: ${data.email}\nis_active: ${data.is_active}`);
+        } else {
+          const bodyText = await res.text();
+          let msg = bodyText;
+          try {
+            const j = JSON.parse(bodyText);
+            if (j.detail) msg = j.detail;
+          } catch (_) {}
+          setStatus("reg_result", `Ошибка регистрации (${res.status})\n${msg}`);
+        }
+      } catch (e) {
+        setStatus("reg_result", "Ошибка сети: " + e);
+      }
+    }
+
+    async function login() {
+      const email = document.getElementById("login_email").value.trim();
+      const password = document.getElementById("login_password").value;
+
+      setStatus("login_result", "");
+
+      try {
+        const res = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setToken(data.access_token);
+          setStatus("login_result", "Токен сохранён в localStorage.");
+          // Автообновим таблицу
+          await loadUsers();
+        } else {
+          const text = await res.text();
+          setStatus("login_result", `Неверный email или пароль (${res.status})\n${text}`);
+        }
+      } catch (e) {
+        setStatus("login_result", "Ошибка сети: " + e);
+      }
+    }
+
+    async function logout() {
+      const token = getToken();
+      if (!token) {
+        setStatus("login_result", "Токена нет — выходить не из чего 🙂");
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/v1/auth/logout", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (res.ok) {
+          clearToken();
+          setStatus("login_result", "Logout выполнен, токен инвалидирован на сервере.");
+        } else {
+          const text = await res.text();
+          setStatus("login_result", `Logout ошибка (${res.status})\n${text}`);
+        }
+      } catch (e) {
+        setStatus("login_result", "Ошибка сети: " + e);
+      }
+    }
+
+    function renderUsers(items) {
+      const tbody = document.getElementById("users_tbody");
+      tbody.innerHTML = "";
+
+      if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="muted">Нет пользователей</td></tr>`;
+        return;
+      }
+
+      for (const u of items) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${u.id}</td>
+          <td>${u.email}</td>
+          <td>${u.is_active ? "Yes" : "No"}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadUsers() {
+      const token = getToken();
+      if (!token) {
+        setStatus("users_result", "Нужен токен. Сначала залогинься.");
+        renderUsers([]);
+        return;
+      }
+
+      const limit = Number(document.getElementById("limit").value || 10);
+      const offset = Number(document.getElementById("offset").value || 0);
+
+      setStatus("users_result", "");
+
+      try {
+        const res = await fetch(`/api/v1/users?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`, {
+          headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setStatus("users_result", `Загружено: ${data.items.length} / всего: ${data.total}`);
+          renderUsers(data.items);
+        } else {
+          const text = await res.text();
+          setStatus("users_result", `Ошибка получения пользователей (${res.status})\n${text}`);
+          renderUsers([]);
+        }
+      } catch (e) {
+        setStatus("users_result", "Ошибка сети: " + e);
+        renderUsers([]);
+      }
+    }
+
+    // init
+    updateTokenPreview();
+  </script>
+</body>
+</html>
