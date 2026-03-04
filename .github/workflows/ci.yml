@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: ["LabWork5"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build services (compose)
+        working-directory: Lab Work №5/src
+        run: docker compose -f docker-compose.yml build
+
+      - name: Start db + backend
+        working-directory: Lab Work №5/src
+        run: docker compose -f docker-compose.yml up -d db backend
+
+      - name: Run integration tests
+        working-directory: Lab Work №5/src
+        run: docker compose -f docker-compose.yml run --rm -e BASE_URL=http://backend:8000 backend pytest -q
+
+      - name: Shutdown
+        if: always()
+        working-directory: Lab Work №5/src
+        run: docker compose -f docker-compose.yml down -v
